@@ -156,6 +156,20 @@ extern "C" size_t MSGetInstructionWidth(void *start) {
         return MSGetInstructionWidthThumb(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(start) & ~0x1));
 }
 
+/* BlockLauncher */
+static void* SubstrateTranslateAddressNoOp(void* input) {
+        return input;
+}
+
+static void* (*SubstrateTranslateAddress)(void*) = SubstrateTranslateAddressNoOp;
+
+static const char* SubstrateTempFilePattern = "/tmp/XXXXXX";
+
+void MSSetAddressTranslationFunction(void* (*translationFunction)(void*), const char* tempFilePattern) {
+        SubstrateTranslateAddress = translationFunction;
+        SubstrateTempFilePattern = tempFilePattern;
+}
+
 static void SubstrateHookFunctionThumb(SubstrateProcessRef process, void *symbol, void *replace, void **result) {
     if (symbol == NULL)
         return;
@@ -177,9 +191,9 @@ static void SubstrateHookFunctionThumb(SubstrateProcessRef process, void *symbol
         if (result != NULL)
             *result = reinterpret_cast<void *>(arm[1]);
 
-        SubstrateHookMemory code(process, arm + 1, sizeof(uint32_t) * 1);
+        //SubstrateHookMemory code(process, arm + 1, sizeof(uint32_t) * 1);
 
-        arm[1] = reinterpret_cast<uint32_t>(replace);
+        reinterpret_cast<uint32_t *>(SubstrateTranslateAddress(arm))[1] = reinterpret_cast<uint32_t>(replace);
 
         return;
     }
@@ -531,19 +545,24 @@ static void SubstrateHookFunctionThumb(SubstrateProcessRef process, void *symbol
     }
 
     {
-        SubstrateHookMemory code(process, area, used);
+        //SubstrateHookMemory code(process, area, used);
 
-        if (align != 0)
-            area[0] = T$nop;
+        if (align != 0) {
+            uint16_t* area_write = reinterpret_cast<uint16_t *>(SubstrateTranslateAddress(area));
+            area_write[0] = T$nop;
+        }
+        uint16_t* thumb_write = reinterpret_cast<uint16_t *>(SubstrateTranslateAddress(thumb));
+        thumb_write[0] = T$bx(A$pc);
+        thumb_write[1] = T$nop;
+        uint32_t* arm_write = reinterpret_cast<uint32_t *>(SubstrateTranslateAddress(arm));
 
-        thumb[0] = T$bx(A$pc);
-        thumb[1] = T$nop;
+        arm_write[0] = A$ldr_rd_$rn_im$(A$pc, A$pc, 4 - 8);
+        arm_write[1] = reinterpret_cast<uint32_t>(replace);
 
-        arm[0] = A$ldr_rd_$rn_im$(A$pc, A$pc, 4 - 8);
-        arm[1] = reinterpret_cast<uint32_t>(replace);
+        uint16_t* trail_write = reinterpret_cast<uint16_t *>(SubstrateTranslateAddress(trail));
 
         for (unsigned offset(0); offset != blank; ++offset)
-            trail[offset] = T$nop;
+            trail_write[offset] = T$nop;
     }
 
     if (MSDebug) {
@@ -554,6 +573,7 @@ static void SubstrateHookFunctionThumb(SubstrateProcessRef process, void *symbol
 }
 
 static void SubstrateHookFunctionARM(SubstrateProcessRef process, void *symbol, void *replace, void **result) {
+
     if (symbol == NULL)
         return;
 

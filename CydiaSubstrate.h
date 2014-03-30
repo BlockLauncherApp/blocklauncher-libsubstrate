@@ -73,6 +73,9 @@ IMP MSHookMessage(Class _class, SEL sel, IMP imp, const char *prefix _default(NU
 void MSHookMessageEx(Class _class, SEL sel, IMP imp, IMP *result);
 #endif
 
+/* BlockLauncher modifications */
+void MSSetAddressTranslationFunction(void* (*translationFunction)(void*), const char* tempFilePattern);
+
 #ifdef SubstrateInternal
 typedef void *SubstrateAllocatorRef;
 typedef struct __SubstrateProcess *SubstrateProcessRef;
